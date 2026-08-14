@@ -20,12 +20,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import sys
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
+from aiohttp import web
 
 from ai.proposal import GeminiProposalGenerator
 from bot import handlers
@@ -142,6 +144,20 @@ async def main() -> None:
         )
     except Exception as exc:
         logger.warning(f"Could not send startup message: {exc}")
+
+    # ── 6.5 Start Dummy Web Server (For Render Free Tier) ──────────────────────
+    async def handle_ping(request):
+        return web.Response(text="Bot is running!")
+
+    app = web.Application()
+    app.router.add_get('/', handle_ping)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    
+    port = int(os.environ.get("PORT", 8080))
+    site = web.TCPSite(runner, '0.0.0.0', port)
+    await site.start()
+    logger.info(f"✅ Dummy web server started on port {port} to satisfy Render health checks.")
 
     # ── 7. Start polling ───────────────────────────────────────────────────────
     logger.info("Starting Telegram polling...")
