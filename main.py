@@ -24,7 +24,7 @@ import os
 import sys
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from aiogram import Bot, Dispatcher
+from aiogram import Bot, Dispatcher, BaseMiddleware
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiohttp import web
@@ -46,6 +46,19 @@ logging.basicConfig(
     ],
 )
 logger = logging.getLogger(__name__)
+
+
+# ── Middleware ─────────────────────────────────────────────────────────────────
+class AccessMiddleware(BaseMiddleware):
+    def __init__(self, allowed_chat_id: str):
+        self.allowed_chat_id = str(allowed_chat_id)
+
+    async def __call__(self, handler, event, data):
+        user = data.get("event_from_user")
+        if user and str(user.id) != self.allowed_chat_id:
+            logger.warning(f"Unauthorized access attempt from user ID: {user.id}")
+            return
+        return await handler(event, data)
 
 
 async def main() -> None:
@@ -90,6 +103,9 @@ async def main() -> None:
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
     dp = Dispatcher()
+
+    # Restrict access to the owner's chat ID
+    dp.update.middleware(AccessMiddleware(settings.telegram_chat_id))
 
     # Pass db and scheduler reference into handlers via workflow_data
     dp.include_router(handlers.router)
