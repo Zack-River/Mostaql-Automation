@@ -27,10 +27,12 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from aiogram import Bot, Dispatcher, BaseMiddleware
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
+from aiogram.fsm.storage.memory import MemoryStorage
 from aiohttp import web
 
 from ai.proposal import GeminiProposalGenerator
 from bot import handlers
+from bot.applicator import MostaqlApplicator
 from config import load_settings
 from db.database import Database
 from scheduler.job_monitor import JobMonitor
@@ -75,14 +77,31 @@ async def main() -> None:
     await db.connect()
 
     # ── 3. Scraper ─────────────────────────────────────────────────────────────
+    # Build session cookies dict if available (preferred over login flow)
+    session_cookies = None
+    if settings.has_session_cookies:
+        session_cookies = {
+            "AWSALB": settings.mostaql_cookie_awsalb,
+            "AWSALBCORS": settings.mostaql_cookie_awsalbcors,
+            "mostaqlweb": settings.mostaql_cookie_session,
+            "XSRF-TOKEN": settings.mostaql_cookie_xsrf,
+        }
+        logger.info("  Auth mode     : SESSION COOKIES ✅")
+    elif settings.is_authenticated:
+        logger.info("  Auth mode     : EMAIL/PASSWORD")
+    else:
+        logger.info("  Auth mode     : PUBLIC (no auth)")
+
     scraper = MostaqlScraper(
         jobs_url=settings.mostaql_jobs_url,
         mostaql_email=settings.mostaql_email,
         mostaql_password=settings.mostaql_password,
+        session_cookies=session_cookies,
     )
     await scraper.__aenter__()   # open httpx client
 
-    if settings.is_authenticated:
+    # Only attempt login if no session cookies are available
+    if not session_cookies and settings.is_authenticated:
         logged_in = await scraper.login()
         if not logged_in:
             logger.warning(
@@ -97,12 +116,20 @@ async def main() -> None:
         base_proposal_prompt=settings.base_proposal_prompt,
     )
 
+    # ── 4.5 Applicator ─────────────────────────────────────────────────────────
+    applicator = None
+    if session_cookies:
+        applicator = MostaqlApplicator(session_cookies=session_cookies)
+        logger.info("  Applicator    : ENABLED ✅ (session cookies available)")
+    else:
+        logger.info("  Applicator    : DISABLED (no session cookies)")
+
     # ── 5. Telegram Bot ────────────────────────────────────────────────────────
     bot = Bot(
         token=settings.telegram_bot_token,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
-    dp = Dispatcher()
+    dp = Dispatcher(storage=MemoryStorage())
 
     # Restrict access to the owner's chat ID
     dp.update.middleware(AccessMiddleware(settings.telegram_chat_id))
@@ -115,6 +142,7 @@ async def main() -> None:
         "scraper": scraper,
         "generator": generator,
         "db": db,
+        "applicator": applicator,
         "scheduler": None  # Will be updated after scheduler initialization
     })
 

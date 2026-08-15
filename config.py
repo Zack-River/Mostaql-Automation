@@ -40,6 +40,12 @@ class Settings:
     mostaql_password: str
     mostaql_category_id: int
 
+    # ── Mostaql Session Cookies ───────────────────────────────────────
+    mostaql_cookie_awsalb: str
+    mostaql_cookie_awsalbcors: str
+    mostaql_cookie_session: str
+    mostaql_cookie_xsrf: str
+
     # ── Gemini AI ─────────────────────────────────────────────────────
     gemini_api_key: str
     gemini_fallback_api_key: str
@@ -69,6 +75,11 @@ class Settings:
         """True when Mostaql credentials are configured."""
         return bool(self.mostaql_email and self.mostaql_password)
 
+    @property
+    def has_session_cookies(self) -> bool:
+        """True when browser session cookies are available."""
+        return bool(self.mostaql_cookie_session)
+
 
 def load_settings() -> Settings:
     """
@@ -81,6 +92,10 @@ def load_settings() -> Settings:
         mostaql_email=_optional("MOSTAQL_EMAIL"),
         mostaql_password=_optional("MOSTAQL_PASSWORD"),
         mostaql_category_id=int(_optional("MOSTAQL_CATEGORY_ID", "1")),
+        mostaql_cookie_awsalb=_optional("MOSTAQL_COOKIE_AWSALB"),
+        mostaql_cookie_awsalbcors=_optional("MOSTAQL_COOKIE_AWSALBCORS"),
+        mostaql_cookie_session=_optional("MOSTAQL_COOKIE_SESSION"),
+        mostaql_cookie_xsrf=_optional("MOSTAQL_COOKIE_XSRF"),
         gemini_api_key=_optional("GEMINI_API_KEY"),
         gemini_fallback_api_key=_optional("GEMINI_FALLBACK_API_KEY", ""),
         gemini_model=_optional("GEMINI_MODEL", "gemini-3.5-flash"),

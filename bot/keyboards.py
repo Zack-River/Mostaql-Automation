@@ -49,6 +49,34 @@ def rating_result_keyboard(job_id: str) -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
+def proposal_keyboard(job_id: str) -> InlineKeyboardMarkup:
+    """Keyboard attached to the generated proposal — adds an Apply button."""
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(
+            text="✅  تقديم العرض الآن",
+            callback_data=f"apply_start:{job_id}",
+        )
+    )
+    return builder.as_markup()
+
+
+def apply_confirm_keyboard(job_id: str) -> InlineKeyboardMarkup:
+    """Final confirmation keyboard before submitting the proposal."""
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(
+            text="✅  تأكيد وإرسال",
+            callback_data=f"apply_confirm:{job_id}",
+        ),
+        InlineKeyboardButton(
+            text="❌  إلغاء",
+            callback_data="apply_cancel",
+        ),
+    )
+    return builder.as_markup()
+
+
 def status_keyboard() -> InlineKeyboardMarkup:
     """Keyboard for the /status command."""
     builder = InlineKeyboardBuilder()

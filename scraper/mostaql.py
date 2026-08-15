@@ -82,6 +82,7 @@ class MostaqlScraper:
         jobs_url: str,
         mostaql_email: str = "",
         mostaql_password: str = "",
+        session_cookies: dict | None = None,
     ) -> None:
         self.jobs_url = jobs_url
         self._email = mostaql_email
@@ -95,6 +96,18 @@ class MostaqlScraper:
             timeout=httpx.Timeout(20.0),
             http2=True,
         )
+
+        # Inject pre-loaded session cookies if provided (skips login flow)
+        if session_cookies:
+            self._inject_cookies(session_cookies)
+            self._logged_in = True
+            logger.info("Session cookies loaded — skipping login flow.")
+
+    def _inject_cookies(self, cookies: dict) -> None:
+        """Inject cookies directly into the httpx client cookie jar."""
+        for name, value in cookies.items():
+            self._client.cookies.set(name, value, domain="mostaql.com")
+        logger.debug(f"Injected {len(cookies)} session cookies.")
 
     # ── Context manager ────────────────────────────────────────────────────────
     async def __aenter__(self) -> "MostaqlScraper":
