@@ -11,6 +11,7 @@ from aiogram.fsm.state import State, StatesGroup
 
 
 class ApplyFlow(StatesGroup):
+    waiting_proposal_note = State()
     waiting_price    = State()
     waiting_duration = State()
     waiting_question = State()

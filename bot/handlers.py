@@ -175,6 +175,7 @@ async def cmd_resume(message: Message, scheduler=None) -> None:
 @router.callback_query(F.data.startswith("gen_proposal:"))
 async def cb_gen_proposal(
     callback: CallbackQuery,
+    state: FSMContext,
     db=None,
     scraper=None,
     generator=None
@@ -207,6 +208,9 @@ async def cb_gen_proposal(
             return
 
         proposal_html = markdown_to_telegram_html(proposal)
+
+        # Save the raw markdown proposal for the apply flow
+        await state.update_data(current_proposal=proposal)
 
         await msg.edit_text(
             f"📋 <b>العرض المقترح:</b>\n\n{proposal_html}",
@@ -265,6 +269,74 @@ async def cb_rate_project(
         await msg.edit_text("⚠️ حدث خطأ أثناء محاولة تقييم المشروع.")
 
 
+# ── Callback: rewrite_proposal ───────────────────────────────────────────────
+@router.callback_query(F.data.startswith("rewrite_proposal:"))
+async def cb_rewrite_proposal(
+    callback: CallbackQuery,
+    state: FSMContext,
+) -> None:
+    job_id = callback.data.split(":", 1)[1]
+    await state.set_state(ApplyFlow.waiting_proposal_note)
+    await state.update_data(job_id=job_id)
+    
+    await callback.message.reply(
+        "✏️ <b>أرسل ملاحظاتك الآن...</b>\n"
+        "سيقوم الذكاء الاصطناعي بإعادة كتابة العرض بناءً عليها.",
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
+@router.message(ApplyFlow.waiting_proposal_note)
+async def process_rewrite_note(
+    message: Message,
+    state: FSMContext,
+    db=None,
+    scraper=None,
+    generator=None,
+) -> None:
+    data = await state.get_data()
+    job_id = data.get("job_id")
+    user_note = message.text.strip() if message.text else ""
+    
+    await state.clear()
+    
+    if not (db and scraper and generator and job_id):
+        await message.answer("⚠️ حدث خطأ أو البوت غير مهيأ.")
+        return
+        
+    msg = await message.reply("🤖 <b>جاري إعادة صياغة العرض مع ملاحظاتك...</b>", parse_mode="HTML")
+    
+    try:
+        url = await db.get_job_url(job_id)
+        if not url:
+            await msg.edit_text("⚠️ لم يتم العثور على رابط المشروع في قاعدة البيانات.")
+            return
+
+        from scraper.models import Job
+        job = Job(id=job_id, url=url)
+        await scraper.fetch_job_details(job)
+
+        proposal = await generator.generate(job, user_notes=user_note)
+        if not proposal:
+            await msg.edit_text("⚠️ تعذر توليد العرض.")
+            return
+
+        proposal_html = markdown_to_telegram_html(proposal)
+
+        # Save the raw markdown proposal for the apply flow
+        await state.update_data(current_proposal=proposal)
+
+        await msg.edit_text(
+            f"📋 <b>العرض المعدل:</b>\n\n{proposal_html}",
+            parse_mode="HTML",
+            reply_markup=proposal_keyboard(job_id),
+        )
+    except Exception as e:
+        logger.error(f"Error rewriting proposal for {job_id}: {e}", exc_info=True)
+        await msg.edit_text("⚠️ حدث خطأ أثناء محاولة إعادة كتابة العرض.")
+
+
 # ════════════════════════════════════════════════════════════════════════════
 #  APPLY FLOW — Multi-step FSM
 # ════════════════════════════════════════════════════════════════════════════
@@ -302,7 +374,11 @@ async def cb_apply_start(
         await wait_msg.edit_text("⚠️ تعذر جلب بيانات الفورم. تأكد من أن الجلسة لا تزال صالحة.")
         return
 
-    # Save state data
+    # Retrieve the saved proposal text
+    data = await state.get_data()
+    proposal_text = data.get("current_proposal", "")
+
+    # Save state data for apply flow
     await state.set_state(ApplyFlow.waiting_price)
     await state.update_data(
         job_id=job_id,
@@ -312,7 +388,7 @@ async def cb_apply_start(
         question_answers={},
         cost="",
         period="",
-        details="",
+        details=proposal_text,
     )
 
     questions = form_data.get("questions", [])

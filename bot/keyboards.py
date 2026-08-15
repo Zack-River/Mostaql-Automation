@@ -58,6 +58,12 @@ def proposal_keyboard(job_id: str) -> InlineKeyboardMarkup:
             callback_data=f"apply_start:{job_id}",
         )
     )
+    builder.row(
+        InlineKeyboardButton(
+            text="✏️  إضافة ملاحظة وإعادة التوليد",
+            callback_data=f"rewrite_proposal:{job_id}",
+        )
+    )
     return builder.as_markup()
 
 

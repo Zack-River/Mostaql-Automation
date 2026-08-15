@@ -66,7 +66,7 @@ class GeminiProposalGenerator:
         return self._enabled
 
     # ── Public API ─────────────────────────────────────────────────────────────
-    async def generate(self, job: Job) -> str:
+    async def generate(self, job: Job, user_notes: str = "") -> str:
         """
         Generate a complete proposal for the given job.
         Returns the proposal text, or an empty string if AI is disabled.
@@ -74,7 +74,7 @@ class GeminiProposalGenerator:
         if not self._enabled:
             return ""
 
-        prompt = self._build_prompt(job)
+        prompt = self._build_prompt(job, user_notes=user_notes)
         
         for i, client in enumerate(self._clients):
             try:
@@ -100,7 +100,7 @@ class GeminiProposalGenerator:
                     logger.warning(f"Gemini API rate limit on key {i}. Falling back to next key...")
                     continue
                 logger.error(f"Gemini API error for job {job.id} (key {i}): {exc}")
-                return "⚠️ تعذّر توليد العرض تلقائياً بسبب استنفاذ الحصة أو وجود خطأ. يرجى مراجعة المفاتيح."
+                return ""
 
     async def rate_job(self, job: Job) -> str:
         """
@@ -136,9 +136,9 @@ class GeminiProposalGenerator:
                     logger.warning(f"Gemini API rate limit on key {i}. Falling back to next key...")
                     continue
                 logger.error(f"Gemini API error (rating) for job {job.id} (key {i}): {exc}")
-                return "⚠️ تعذّر تقييم المشروع تلقائياً بسبب استنفاذ الحصة أو وجود خطأ."
+                return ""
 
-    def _build_prompt(self, job: Job, is_rating: bool = False) -> str:
+    def _build_prompt(self, job: Job, is_rating: bool = False, user_notes: str = "") -> str:
         """
         Builds the prompt using the user's custom system prompt template.
         """
@@ -164,8 +164,8 @@ class GeminiProposalGenerator:
             questions_text = "\n".join(q.question for q in job.questions) if job.questions else "لا توجد أسئلة."
 
         template = MOSTAQL_RATING_PROMPT if is_rating else MOSTAQL_SYSTEM_PROMPT
-        
-        return template.format(
+
+        fmt_kwargs = dict(
             project_description=job.full_description or job.description_snippet or "غير محدد",
             project_budget=job.budget or "غير محدد",
             project_duration=job.duration or "غير محدد",
@@ -173,3 +173,8 @@ class GeminiProposalGenerator:
             questions=questions_text,
             developer_experience=RAWAN_PROFILE,
         )
+        # user_notes only exists in MOSTAQL_SYSTEM_PROMPT template
+        if not is_rating:
+            fmt_kwargs["user_notes"] = user_notes or "لا توجد ملاحظات إضافية."
+
+        return template.format(**fmt_kwargs)
