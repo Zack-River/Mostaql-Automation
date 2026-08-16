@@ -60,10 +60,13 @@ def format_notification(job: Job) -> str:
 
     # ── Description ───────────────────────────────────────────────────────────
     desc = (job.full_description or job.description_snippet).strip()
-    # Collapse multiple newlines to a single space for cleaner Telegram display
-    desc = " ".join(desc.split())
-    if len(desc) > 350:
-        desc = desc[:350] + "..."
+    # Limit consecutive newlines to 2, preserve line breaks
+    import re
+    desc = re.sub(r'\n{3,}', '\n\n', desc)
+    
+    # Telegram max message length is 4096. Reserve ~500 chars for metadata.
+    if len(desc) > 3500:
+        desc = desc[:3500] + "\n\n... [النص طويل جداً، تم قصه]"
     if desc:
         lines += [
             "📝 <b>الوصف:</b>",
