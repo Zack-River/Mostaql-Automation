@@ -21,6 +21,7 @@ class TestRefactoredAI(unittest.IsolatedAsyncioTestCase):
         warnings.simplefilter("ignore", ResourceWarning)
         api_key = os.getenv("GEMINI_API_KEY")
         fallback_key = os.getenv("GEMINI_FALLBACK_API_KEY")
+        fallback_key_2 = os.getenv("GEMINI_FALLBACK_API_KEY_2")
         if not api_key:
             raise unittest.SkipTest("GEMINI_API_KEY not found in environment")
         
@@ -28,6 +29,8 @@ class TestRefactoredAI(unittest.IsolatedAsyncioTestCase):
         keys = [api_key]
         if fallback_key:
             keys.append(fallback_key)
+        if fallback_key_2:
+            keys.append(fallback_key_2)
         cls.ai = GeminiProposalGenerator(keys, "gemini-3.5-flash", MOSTAQL_SYSTEM_PROMPT)
 
     async def run_scenario(self, title, description, budget, duration, questions=None, user_notes=""):

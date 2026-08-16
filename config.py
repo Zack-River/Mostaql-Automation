@@ -49,6 +49,7 @@ class Settings:
     # ── Gemini AI ─────────────────────────────────────────────────────
     gemini_api_key: str
     gemini_fallback_api_key: str
+    gemini_fallback_api_key_2: str
     gemini_model: str
 
     # ── Bot Behaviour ─────────────────────────────────────────────────
@@ -98,6 +99,7 @@ def load_settings() -> Settings:
         mostaql_cookie_xsrf=_optional("MOSTAQL_COOKIE_XSRF"),
         gemini_api_key=_optional("GEMINI_API_KEY"),
         gemini_fallback_api_key=_optional("GEMINI_FALLBACK_API_KEY", ""),
+        gemini_fallback_api_key_2=_optional("GEMINI_FALLBACK_API_KEY_2", ""),
         gemini_model=_optional("GEMINI_MODEL", "gemini-3.5-flash"),
         poll_interval_seconds=int(_optional("POLL_INTERVAL_SECONDS", "30")),
         base_proposal_prompt=_optional(

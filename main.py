@@ -116,7 +116,11 @@ async def main() -> None:
 
     # ── 5. AI Generator ────────────────────────────────────────────────────────
     generator = GeminiProposalGenerator(
-        api_keys=[settings.gemini_api_key, settings.gemini_fallback_api_key],
+        api_keys=[
+            settings.gemini_api_key, 
+            settings.gemini_fallback_api_key,
+            settings.gemini_fallback_api_key_2
+        ],
         model_name=settings.gemini_model,
         base_proposal_prompt=settings.base_proposal_prompt,
     )
