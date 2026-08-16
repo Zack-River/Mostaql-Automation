@@ -122,12 +122,11 @@ async def main() -> None:
     )
 
     # ── 6. Applicator ──────────────────────────────────────────────────────────
-    applicator = None
+    applicator = MostaqlApplicator(session_cookies=session_manager.cookies)
     if session_manager.has_cookies:
-        applicator = MostaqlApplicator(session_cookies=session_manager.cookies)
         logger.info("  Applicator    : ENABLED ✅")
     else:
-        logger.info("  Applicator    : DISABLED (no session cookies)")
+        logger.info("  Applicator    : ENABLED (awaiting cookies)")
 
     # Register live references in session_manager for push-updates after /refresh_session
     session_manager.register(scraper=scraper, applicator=applicator)

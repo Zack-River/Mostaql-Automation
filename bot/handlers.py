@@ -339,10 +339,10 @@ async def process_rewrite_note(
 async def cb_quick_apply(
     callback: CallbackQuery,
     state: FSMContext,
-    db=None, scraper=None, generator=None, applicator=None,
+    db=None, scraper=None, generator=None, applicator=None, session_manager=None,
 ) -> None:
     job_id = callback.data.split(":", 1)[1]
-    if not applicator:
+    if not session_manager or not session_manager.has_cookies:
         await callback.answer("⚠️ خاصية التقديم التلقائي غير مفعّلة (لا يوجد session cookies).")
         return
     await callback.answer()
@@ -422,10 +422,10 @@ async def cb_quick_apply(
 async def cb_custom_apply(
     callback: CallbackQuery,
     state: FSMContext,
-    db=None, scraper=None, generator=None, applicator=None,
+    db=None, scraper=None, generator=None, applicator=None, session_manager=None,
 ) -> None:
     job_id = callback.data.split(":", 1)[1]
-    if not applicator:
+    if not session_manager or not session_manager.has_cookies:
         await callback.answer("⚠️ خاصية التقديم التلقائي غير مفعّلة.")
         return
     await callback.answer()
@@ -677,7 +677,7 @@ async def cb_apply_confirm(
     data = await state.get_data()
     await state.clear()
 
-    if not applicator:
+    if not session_manager or not session_manager.has_cookies:
         await callback.message.edit_text("⚠️ خاصية التقديم التلقائي غير مفعّلة.", reply_markup=None)
         return
 
@@ -749,7 +749,7 @@ async def cb_apply_dryrun(
     await callback.answer("🧪 جاري اختبار الإرسال بدون نشر فعلي...")
     data = await state.get_data()
 
-    if not applicator:
+    if not session_manager or not session_manager.has_cookies:
         await callback.message.reply("⚠️ خاصية التقديم التلقائي غير مفعّلة.")
         return
 
