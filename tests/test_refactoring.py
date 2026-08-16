@@ -20,11 +20,15 @@ class TestRefactoredAI(unittest.IsolatedAsyncioTestCase):
         # Ignore resource warnings from httpx/asyncio
         warnings.simplefilter("ignore", ResourceWarning)
         api_key = os.getenv("GEMINI_API_KEY")
+        fallback_key = os.getenv("GEMINI_FALLBACK_API_KEY")
         if not api_key:
             raise unittest.SkipTest("GEMINI_API_KEY not found in environment")
         
         from ai.prompts import MOSTAQL_SYSTEM_PROMPT
-        cls.ai = GeminiProposalGenerator([api_key], "gemini-3.5-flash", MOSTAQL_SYSTEM_PROMPT)
+        keys = [api_key]
+        if fallback_key:
+            keys.append(fallback_key)
+        cls.ai = GeminiProposalGenerator(keys, "gemini-3.5-flash", MOSTAQL_SYSTEM_PROMPT)
 
     async def run_scenario(self, title, description, budget, duration, questions=None, user_notes=""):
         from scraper.models import ClientProfile
@@ -70,20 +74,46 @@ class TestRefactoredAI(unittest.IsolatedAsyncioTestCase):
         print(f"Params:\n{params}\n")
 
         # Semantic Checks:
-        # 1. Proposal must NOT assert complex systems as facts without conditional language
-        factual_forbidden = [r"(سيحدث|يجب أن يحتوي|نحتاج إلى) لوحة تحكم",
-                             r"سنبني.*API",
-                             r"سنقوم بعمل.*بوابة دفع",
-                             r"خرائط Google",
-                             r"Double Booking"]
-        for regex in factual_forbidden:
-            self.assertNotRegex(proposal, regex, f"Unsupported certainty detected: {regex}")
+        # 1. Proposal must NOT assert complex unrequested systems as facts
+        unrequested_features = [
+            r"Booking Engine",
+            r"Payment Gateway",
+            r"Dashboard",
+            r"لوحة تحكم",
+            r"API",
+            r"Wallet",
+            r"عمولات",
+            r"Double Booking",
+            r"Concurrency Control"
+        ]
+        # We need to make sure it doesn't assert them as facts. 
+        # Actually, the user rule is stricter: "NEVER introduce a concrete feature... If not explicitly stated => UNKNOWN. Do NOT introduce it into the proposal as part of the proposed implementation."
+        # Even with conditional language, it should not invent the architecture!
+        for feature in unrequested_features:
+            self.assertNotRegex(proposal, feature, f"Unrequested Feature Ban violation: {feature} found.")
 
-        # 2. Should use conditional language if it mentions inferred requirements
-        if "حجز" in proposal or "إيجار" in proposal:
-            self.assertRegex(proposal, r'(إذا|لو|قد|في حال)', "Inferences about booking must use conditional language.")
+        # 2. Must NOT assert unsupported deterministic risks
+        deterministic_risks = [
+            r"بطء شديد",
+            r"ستحدث تضاربات",
+            r"خسارة العملاء"
+        ]
+        for risk in deterministic_risks:
+            self.assertNotRegex(proposal, risk, f"Unsupported Deterministic Risk violation: {risk} found.")
 
-        # 3. Should ask exactly one smart question or zero
+        # 3. Experience Regression Test (Unsupported capabilities)
+        unsupported_capabilities = [
+            r"محركات الحجز",
+            r"المعاملات المالية",
+            r"Payment Systems",
+            r"Wallets",
+            r"Marketplace Architecture",
+            r"أنظمة الحجوزات"
+        ]
+        for cap in unsupported_capabilities:
+            self.assertNotRegex(proposal, cap, f"Experience Regression violation: Unsupported capability {cap} claimed.")
+
+        # 4. Should ask exactly one smart question or zero
         question_count = proposal.count('؟')
         self.assertTrue(question_count <= 1, "Must ask at most one smart question.")
 
