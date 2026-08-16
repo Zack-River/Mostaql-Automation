@@ -42,7 +42,7 @@ class SessionManager:
             self._cookies = {k: v for k, v in env_cookies.items() if v}
             logger.info(f"Session cookies loaded from .env ({len(self._cookies)} cookies)")
         else:
-            logger.warning("No session cookies found. Use /refresh_session to log in.")
+            logger.warning("No session cookies found. Use /update_cookie to set them.")
 
         # Live references — populated by main.py after init
         self._scraper: "MostaqlScraper | None" = None

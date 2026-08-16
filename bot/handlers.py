@@ -42,7 +42,7 @@ from bot.keyboards import (
     status_keyboard,
     job_keyboard,
 )
-from bot.states import ApplyFlow, RefreshFlow
+from bot.states import ApplyFlow, CookieUpdateFlow
 from scheduler.job_monitor import format_notification
 
 logger = logging.getLogger(__name__)
@@ -804,102 +804,56 @@ async def cb_apply_dryrun(
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  🔄 SESSION REFRESH — /refresh_session + 2FA flow
+#  🔄 SESSION REFRESH — /update_cookie
 # ══════════════════════════════════════════════════════════════════════════════
 
-@router.message(Command("refresh_session"))
-async def cmd_refresh_session(
+@router.message(Command("update_cookie"))
+async def cmd_update_cookie(
     message: Message,
     state: FSMContext,
-    scraper=None,
-    session_manager=None,
 ) -> None:
-    if not scraper:
-        await message.answer("⚠️ السكريبر غير متصل.")
-        return
-    if not scraper.is_authenticated:
-        await message.answer(
-            "⚠️ لا توجد بيانات اعتماد (إيميل/باسورد) في الإعدادات.\n"
-            "أضف <code>MOSTAQL_EMAIL</code> و <code>MOSTAQL_PASSWORD</code> في ملف .env",
-            parse_mode="HTML",
-        )
-        return
+    await state.set_state(CookieUpdateFlow.waiting_for_cookie)
+    await message.answer(
+        "🔄 <b>تحديث جلسة مستقل</b>\n\n"
+        "يرجى استخراج قيمة الكوكي الخاصة بـ <code>mostaqlweb</code> (أو إرسال سطر الكوكيز كاملاً) من المتصفح ولصقها هنا:\n"
+        "<i>(سيتم تحديث الجلسة وحفظها فوراً بدون الحاجة لإعادة تشغيل البوت)</i>",
+        parse_mode="HTML"
+    )
 
-    msg = await message.answer("🔄 <b>جاري محاولة تسجيل الدخول إلى مستقل...</b>", parse_mode="HTML")
-
-    try:
-        result = await scraper.login()
-
-        if result == "2FA_REQUIRED":
-            await state.set_state(RefreshFlow.waiting_2fa)
-            await msg.edit_text(
-                "📱 <b>مطلوب رمز التحقق الثنائي (2FA)</b>\n\n"
-                "افتح تطبيق المصادقة الخاص بك وأرسل الرمز المكوّن من 6 أرقام:",
-                parse_mode="HTML",
-            )
-
-        elif result is True:
-            new_cookies = scraper.extract_session_cookies()
-            if session_manager and new_cookies:
-                session_manager.update_and_push(new_cookies)
-                await msg.edit_text(
-                    f"✅ <b>تم تجديد الجلسة بنجاح!</b>\n"
-                    f"({len(new_cookies)} cookies محدّثة — بدون إعادة تشغيل)",
-                    parse_mode="HTML",
-                )
-            else:
-                await msg.edit_text("✅ تم تسجيل الدخول، لكن لم يتم استخراج الكوكيز. أعد المحاولة.")
-        else:
-            await msg.edit_text(
-                "❌ <b>فشل تسجيل الدخول.</b>\n"
-                "تحقق من صحة الإيميل والباسورد في الإعدادات.",
-                parse_mode="HTML",
-            )
-
-    except Exception as exc:
-        logger.error(f"refresh_session error: {exc}", exc_info=True)
-        await msg.edit_text(f"⚠️ حدث خطأ أثناء تسجيل الدخول: {exc}")
-
-
-@router.message(RefreshFlow.waiting_2fa)
-async def process_2fa_code(
+@router.message(CookieUpdateFlow.waiting_for_cookie)
+async def process_new_cookie(
     message: Message,
     state: FSMContext,
-    scraper=None,
     session_manager=None,
-    applicator=None,
 ) -> None:
-    code = message.text.strip() if message.text else ""
-
-    if not code.isdigit() or len(code) not in (6, 7, 8):
-        await message.answer("⚠️ الرمز يجب أن يكون أرقاماً فقط (6-8 خانات). أرسله مجدداً:")
-        return
-
+    cookie_text = message.text.strip() if message.text else ""
     await state.clear()
-    msg = await message.reply("🔄 <b>جاري التحقق من الرمز...</b>", parse_mode="HTML")
+    
+    if not cookie_text:
+        await message.answer("⚠️ النص فارغ. تم إلغاء العملية.")
+        return
 
-    try:
-        success = await scraper.submit_2fa(code)
+    new_cookies = {}
+    if "=" in cookie_text:
+        import http.cookies
+        try:
+            cookie = http.cookies.SimpleCookie()
+            cookie.load(cookie_text)
+            new_cookies = {k: v.value for k, v in cookie.items()}
+        except Exception as e:
+            logger.error(f"Failed to parse cookie string: {e}")
+            new_cookies = {"mostaqlweb": cookie_text}
+    else:
+        new_cookies = {"mostaqlweb": cookie_text}
 
-        if success:
-            new_cookies = scraper.extract_session_cookies()
-            if session_manager and new_cookies:
-                session_manager.update_and_push(new_cookies)
-                await msg.edit_text(
-                    f"✅ <b>تم تجديد الجلسة بنجاح!</b>\n"
-                    f"({len(new_cookies)} cookies محدّثة — الجلسة نشطة الآن بدون إعادة تشغيل 🎉)",
-                    parse_mode="HTML",
-                )
-            else:
-                await msg.edit_text("✅ تم التحقق من 2FA، لكن لم يتم استخراج الكوكيز. أعد المحاولة.")
-        else:
-            await msg.edit_text(
-                "❌ <b>رمز التحقق غير صحيح أو انتهت صلاحيته.</b>\n"
-                "اكتب /refresh_session للمحاولة مجدداً.",
-                parse_mode="HTML",
-            )
-
-    except Exception as exc:
-        logger.error(f"2FA submit error: {exc}", exc_info=True)
-        await msg.edit_text(f"⚠️ حدث خطأ أثناء التحقق: {exc}")
+    if session_manager:
+        session_manager.update_and_push(new_cookies)
+        await message.answer(
+            f"✅ <b>تم تحديث الجلسة بنجاح!</b>\n"
+            f"عدد الكوكيز المحدثة: {len(new_cookies)}\n"
+            f"الجلسة الآن نشطة ومستعدة للعمل.",
+            parse_mode="HTML"
+        )
+    else:
+        await message.answer("⚠️ <code>SessionManager</code> غير متصل. لا يمكن التحديث.", parse_mode="HTML")
 

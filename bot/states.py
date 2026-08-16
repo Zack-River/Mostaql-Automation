@@ -30,6 +30,6 @@ class ApplyFlow(StatesGroup):
     custom_confirm  = State()
 
 
-class RefreshFlow(StatesGroup):
-    waiting_2fa = State()
+class CookieUpdateFlow(StatesGroup):
+    waiting_for_cookie = State()
 

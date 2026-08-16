@@ -144,7 +144,7 @@ class MostaqlApplicator:
         if not csrf or not project_id:
             return ApplyResult(
                 success=False,
-                message="⚠️ تعذر استخراج CSRF token أو معرف المشروع."
+                message="❌ الجلسة انتهت أو تعذر استخراج CSRF token. يرجى إرسال الكوكيز الجديدة باستخدام الأمر /update_cookie"
             )
 
         # Build POST payload
