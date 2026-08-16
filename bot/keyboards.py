@@ -100,6 +100,9 @@ def apply_confirm_keyboard(job_id: str) -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="✅  تأكيد وإرسال", callback_data=f"apply_confirm:{job_id}"),
         InlineKeyboardButton(text="❌  إلغاء", callback_data="apply_cancel"),
     )
+    builder.row(
+        InlineKeyboardButton(text="🧪  اختبار Dry Run (بدون إرسال)", callback_data=f"apply_dryrun:{job_id}"),
+    )
     return builder.as_markup()
 
 

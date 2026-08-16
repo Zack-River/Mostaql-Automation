@@ -31,6 +31,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiohttp import web
 
 from ai.proposal import GeminiProposalGenerator
+from auth.session_manager import SessionManager
 from bot import handlers
 from bot.applicator import MostaqlApplicator
 from config import load_settings
@@ -76,53 +77,60 @@ async def main() -> None:
     db = Database(settings.db_path)
     await db.connect()
 
-    # ── 3. Scraper ─────────────────────────────────────────────────────────────
-    # Build session cookies dict if available (preferred over login flow)
-    session_cookies = None
+    # ── 3. Session Manager (single source of truth for cookies) ────────────────
+    env_cookies = None
     if settings.has_session_cookies:
-        session_cookies = {
+        env_cookies = {
             "AWSALB": settings.mostaql_cookie_awsalb,
             "AWSALBCORS": settings.mostaql_cookie_awsalbcors,
             "mostaqlweb": settings.mostaql_cookie_session,
             "XSRF-TOKEN": settings.mostaql_cookie_xsrf,
         }
+
+    session_manager = SessionManager(env_cookies=env_cookies)
+
+    if session_manager.has_cookies:
         logger.info("  Auth mode     : SESSION COOKIES ✅")
     elif settings.is_authenticated:
-        logger.info("  Auth mode     : EMAIL/PASSWORD")
+        logger.info("  Auth mode     : EMAIL/PASSWORD (no cookies yet)")
     else:
         logger.info("  Auth mode     : PUBLIC (no auth)")
 
+    # ── 4. Scraper ─────────────────────────────────────────────────────────────
     scraper = MostaqlScraper(
         jobs_url=settings.mostaql_jobs_url,
         mostaql_email=settings.mostaql_email,
         mostaql_password=settings.mostaql_password,
-        session_cookies=session_cookies,
+        session_cookies=session_manager.cookies if session_manager.has_cookies else None,
     )
-    await scraper.__aenter__()   # open httpx client
+    await scraper.__aenter__()
 
-    # Only attempt login if no session cookies are available
-    if not session_cookies and settings.is_authenticated:
-        logged_in = await scraper.login()
-        if not logged_in:
-            logger.warning(
-                "Mostaql login failed — running in PUBLIC mode. "
-                "Hiring rate and Q&A fields will not be available."
-            )
+    # Only attempt login if no session cookies available
+    if not session_manager.has_cookies and settings.is_authenticated:
+        result = await scraper.login()
+        if result is True:
+            new_cookies = scraper.extract_session_cookies()
+            session_manager.update_and_push(new_cookies)
+        elif result != "2FA_REQUIRED":
+            logger.warning("Mostaql login failed — running in PUBLIC mode.")
 
-    # ── 4. AI Generator ────────────────────────────────────────────────────────
+    # ── 5. AI Generator ────────────────────────────────────────────────────────
     generator = GeminiProposalGenerator(
         api_keys=[settings.gemini_api_key, settings.gemini_fallback_api_key],
         model_name=settings.gemini_model,
         base_proposal_prompt=settings.base_proposal_prompt,
     )
 
-    # ── 4.5 Applicator ─────────────────────────────────────────────────────────
+    # ── 6. Applicator ──────────────────────────────────────────────────────────
     applicator = None
-    if session_cookies:
-        applicator = MostaqlApplicator(session_cookies=session_cookies)
-        logger.info("  Applicator    : ENABLED ✅ (session cookies available)")
+    if session_manager.has_cookies:
+        applicator = MostaqlApplicator(session_cookies=session_manager.cookies)
+        logger.info("  Applicator    : ENABLED ✅")
     else:
         logger.info("  Applicator    : DISABLED (no session cookies)")
+
+    # Register live references in session_manager for push-updates after /refresh_session
+    session_manager.register(scraper=scraper, applicator=applicator)
 
     # ── 5. Telegram Bot ────────────────────────────────────────────────────────
     bot = Bot(
@@ -143,6 +151,7 @@ async def main() -> None:
         "generator": generator,
         "db": db,
         "applicator": applicator,
+        "session_manager": session_manager,
         "scheduler": None  # Will be updated after scheduler initialization
     })
 

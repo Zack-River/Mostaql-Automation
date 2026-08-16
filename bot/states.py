@@ -28,3 +28,8 @@ class ApplyFlow(StatesGroup):
     custom_duration = State()
     custom_question = State()
     custom_confirm  = State()
+
+
+class RefreshFlow(StatesGroup):
+    waiting_2fa = State()
+

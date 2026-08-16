@@ -42,7 +42,7 @@ from bot.keyboards import (
     status_keyboard,
     job_keyboard,
 )
-from bot.states import ApplyFlow
+from bot.states import ApplyFlow, RefreshFlow
 from scheduler.job_monitor import format_notification
 
 logger = logging.getLogger(__name__)
@@ -734,3 +734,136 @@ async def cb_resume(callback: CallbackQuery, scheduler=None) -> None:
         scheduler.resume()
     await callback.answer("▶️ تم الاستئناف.")
     await callback.message.edit_reply_markup(reply_markup=status_keyboard())
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  🧪 DRY RUN
+# ══════════════════════════════════════════════════════════════════════════════
+
+@router.callback_query(F.data.startswith("apply_dryrun:"))
+async def cb_apply_dryrun(
+    callback: CallbackQuery,
+    state: FSMContext,
+    applicator=None,
+) -> None:
+    await callback.answer("🧪 جاري اختبار الإرسال بدون نشر فعلي...")
+    data = await state.get_data()
+
+    if not applicator:
+        await callback.message.reply("⚠️ خاصية التقديم التلقائي غير مفعّلة.")
+        return
+
+    from bot.applicator import JobApplyData
+    apply_data = JobApplyData(
+        job_id=data.get("job_id", ""),
+        job_url=data.get("job_url", ""),
+        cost=data.get("cost", ""),
+        period=data.get("period", ""),
+        details=data.get("details", ""),
+        question_answers=data.get("question_answers", {}),
+    )
+
+    result = await applicator.submit(apply_data, dry_run=True)
+    await callback.message.reply(result.message, parse_mode="HTML")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  🔄 SESSION REFRESH — /refresh_session + 2FA flow
+# ══════════════════════════════════════════════════════════════════════════════
+
+@router.message(Command("refresh_session"))
+async def cmd_refresh_session(
+    message: Message,
+    state: FSMContext,
+    scraper=None,
+    session_manager=None,
+) -> None:
+    if not scraper:
+        await message.answer("⚠️ السكريبر غير متصل.")
+        return
+    if not scraper.is_authenticated:
+        await message.answer(
+            "⚠️ لا توجد بيانات اعتماد (إيميل/باسورد) في الإعدادات.\n"
+            "أضف <code>MOSTAQL_EMAIL</code> و <code>MOSTAQL_PASSWORD</code> في ملف .env",
+            parse_mode="HTML",
+        )
+        return
+
+    msg = await message.answer("🔄 <b>جاري محاولة تسجيل الدخول إلى مستقل...</b>", parse_mode="HTML")
+
+    try:
+        result = await scraper.login()
+
+        if result == "2FA_REQUIRED":
+            await state.set_state(RefreshFlow.waiting_2fa)
+            await msg.edit_text(
+                "📱 <b>مطلوب رمز التحقق الثنائي (2FA)</b>\n\n"
+                "افتح تطبيق المصادقة الخاص بك وأرسل الرمز المكوّن من 6 أرقام:",
+                parse_mode="HTML",
+            )
+
+        elif result is True:
+            new_cookies = scraper.extract_session_cookies()
+            if session_manager and new_cookies:
+                session_manager.update_and_push(new_cookies)
+                await msg.edit_text(
+                    f"✅ <b>تم تجديد الجلسة بنجاح!</b>\n"
+                    f"({len(new_cookies)} cookies محدّثة — بدون إعادة تشغيل)",
+                    parse_mode="HTML",
+                )
+            else:
+                await msg.edit_text("✅ تم تسجيل الدخول، لكن لم يتم استخراج الكوكيز. أعد المحاولة.")
+        else:
+            await msg.edit_text(
+                "❌ <b>فشل تسجيل الدخول.</b>\n"
+                "تحقق من صحة الإيميل والباسورد في الإعدادات.",
+                parse_mode="HTML",
+            )
+
+    except Exception as exc:
+        logger.error(f"refresh_session error: {exc}", exc_info=True)
+        await msg.edit_text(f"⚠️ حدث خطأ أثناء تسجيل الدخول: {exc}")
+
+
+@router.message(RefreshFlow.waiting_2fa)
+async def process_2fa_code(
+    message: Message,
+    state: FSMContext,
+    scraper=None,
+    session_manager=None,
+    applicator=None,
+) -> None:
+    code = message.text.strip() if message.text else ""
+
+    if not code.isdigit() or len(code) not in (6, 7, 8):
+        await message.answer("⚠️ الرمز يجب أن يكون أرقاماً فقط (6-8 خانات). أرسله مجدداً:")
+        return
+
+    await state.clear()
+    msg = await message.reply("🔄 <b>جاري التحقق من الرمز...</b>", parse_mode="HTML")
+
+    try:
+        success = await scraper.submit_2fa(code)
+
+        if success:
+            new_cookies = scraper.extract_session_cookies()
+            if session_manager and new_cookies:
+                session_manager.update_and_push(new_cookies)
+                await msg.edit_text(
+                    f"✅ <b>تم تجديد الجلسة بنجاح!</b>\n"
+                    f"({len(new_cookies)} cookies محدّثة — الجلسة نشطة الآن بدون إعادة تشغيل 🎉)",
+                    parse_mode="HTML",
+                )
+            else:
+                await msg.edit_text("✅ تم التحقق من 2FA، لكن لم يتم استخراج الكوكيز. أعد المحاولة.")
+        else:
+            await msg.edit_text(
+                "❌ <b>رمز التحقق غير صحيح أو انتهت صلاحيته.</b>\n"
+                "اكتب /refresh_session للمحاولة مجدداً.",
+                parse_mode="HTML",
+            )
+
+    except Exception as exc:
+        logger.error(f"2FA submit error: {exc}", exc_info=True)
+        await msg.edit_text(f"⚠️ حدث خطأ أثناء التحقق: {exc}")
+

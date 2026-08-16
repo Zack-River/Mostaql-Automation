@@ -54,7 +54,12 @@ class MostaqlApplicator:
     """
 
     def __init__(self, session_cookies: dict[str, str]) -> None:
-        self._cookies = session_cookies
+        self._cookies = dict(session_cookies)
+
+    def update_cookies(self, new_cookies: dict[str, str]) -> None:
+        """Update session cookies in memory (no restart needed)."""
+        self._cookies = dict(new_cookies)
+        logger.info(f"Applicator cookies updated ({len(self._cookies)} cookies)")
 
     def _make_client(self) -> httpx.AsyncClient:
         client = httpx.AsyncClient(
@@ -120,10 +125,10 @@ class MostaqlApplicator:
             logger.error(f"Error fetching form data: {exc}", exc_info=True)
             return None
 
-    async def submit(self, apply_data: JobApplyData) -> ApplyResult:
+    async def submit(self, apply_data: JobApplyData, dry_run: bool = False) -> ApplyResult:
         """
         Submit the proposal to mostaql.com/bid.
-        Returns ApplyResult with success status and message.
+        If dry_run=True, returns the payload that *would* be sent without actually posting.
         """
         # First, get a fresh CSRF token from the project page
         form_data = await self.get_form_data(apply_data.job_url)
@@ -179,6 +184,25 @@ class MostaqlApplicator:
             ("files", ""),
             ("multiple_up_completed", "1"),
         ]
+
+        # ── DRY RUN mode — show payload without submitting ──────────────────
+        if dry_run:
+            q_preview = "\n".join(
+                f"  answers[{qid}] = {ans[:80]}..."
+                if len(ans) > 80 else f"  answers[{qid}] = {ans}"
+                for qid, ans in apply_data.question_answers.items()
+            ) or "  (لا توجد أسئلة)"
+            payload_preview = (
+                f"🧪 <b>Dry Run — ما سيُرسل إلى مستقل:</b>\n\n"
+                f"<b>URL:</b> <code>{BID_URL}</code>\n"
+                f"<b>project_id:</b> <code>{project_id}</code>\n"
+                f"<b>cost:</b> <code>{apply_data.cost}$</code>\n"
+                f"<b>period:</b> <code>{apply_data.period} يوم</code>\n"
+                f"<b>details:</b> <code>{(apply_data.details or '—')[:100]}...</code>\n"
+                f"<b>questions:</b>\n{q_preview}\n\n"
+                f"✅ الـ CSRF token وجد بنجاح — الفورم جاهز للإرسال."
+            )
+            return ApplyResult(success=True, message=payload_preview)
 
         try:
             async with self._make_client() as client:

@@ -121,12 +121,13 @@ class MostaqlScraper:
         return bool(self._email and self._password)
 
     # ── Authentication ─────────────────────────────────────────────────────────
-    async def login(self) -> bool:
+    async def login(self) -> str | bool:
         """
         Log in to Mostaql using email/password.
-        Mostaql is a Laravel app → fetch CSRF token from login page first,
-        then POST credentials.
-        Returns True on success.
+        Returns:
+          True          — login succeeded without 2FA
+          "2FA_REQUIRED" — credentials OK but 2FA code needed
+          False         — login failed
         """
         if not self.is_authenticated:
             logger.warning("Login skipped — no Mostaql credentials configured.")
@@ -140,7 +141,6 @@ class MostaqlScraper:
 
             csrf_input = soup.find("input", {"name": "_token"})
             if not csrf_input:
-                # Try meta tag fallback
                 csrf_meta = soup.find("meta", {"name": "csrf-token"})
                 csrf = csrf_meta["content"] if csrf_meta else ""
             else:
@@ -160,21 +160,80 @@ class MostaqlScraper:
             login_resp = await self._client.post(LOGIN_URL, data=payload)
             login_resp.raise_for_status()
 
-            # Verify login succeeded by checking for logout link in response
-            if "logout" in login_resp.text.lower() or "تسجيل الخروج" in login_resp.text:
+            final_url = str(login_resp.url)
+            page_text  = login_resp.text
+
+            # Detect 2FA page
+            if "two-factor" in final_url or "two_factor" in final_url or "verification" in final_url:
+                logger.info("2FA required — waiting for user code")
+                return "2FA_REQUIRED"
+
+            # Also detect 2FA by page content
+            if "two-factor" in page_text.lower() or "رمز التحقق" in page_text:
+                logger.info("2FA required (detected in page content)")
+                return "2FA_REQUIRED"
+
+            # Check successful login
+            if "logout" in page_text.lower() or "تسجيل الخروج" in page_text:
                 self._logged_in = True
-                logger.info("✅ Logged in to Mostaql successfully.")
+                logger.info("✅ Logged in to Mostaql successfully (no 2FA).")
                 return True
-            else:
-                logger.error(
-                    "Login POST returned 200 but page doesn't look logged-in. "
-                    "Check credentials."
-                )
-                return False
+
+            logger.error("Login POST returned 200 but session not established. Check credentials.")
+            return False
 
         except httpx.HTTPError as exc:
             logger.error(f"HTTP error during Mostaql login: {exc}")
             return False
+
+    async def submit_2fa(self, code: str) -> bool:
+        """
+        Submit a 2FA verification code to complete the login flow.
+        Call this after login() returns "2FA_REQUIRED".
+        Returns True on success.
+        """
+        TWOFA_URL = f"{BASE_URL}/two-factor-challenge"
+        try:
+            # GET the 2FA page for a fresh CSRF token
+            resp = await self._client.get(TWOFA_URL)
+            soup = _soup(resp.text)
+
+            csrf_input = soup.find("input", {"name": "_token"})
+            csrf = csrf_input.get("value", "") if csrf_input else ""
+            if not csrf:
+                csrf_meta = soup.find("meta", {"name": "csrf-token"})
+                csrf = csrf_meta["content"] if csrf_meta else ""
+
+            payload = {"_token": csrf, "code": code}
+            twofa_resp = await self._client.post(TWOFA_URL, data=payload)
+
+            page_text = twofa_resp.text
+            if "logout" in page_text.lower() or "تسجيل الخروج" in page_text:
+                self._logged_in = True
+                logger.info("✅ 2FA verification successful — fully logged in.")
+                return True
+
+            logger.error("2FA code rejected or session not established.")
+            return False
+
+        except httpx.HTTPError as exc:
+            logger.error(f"HTTP error during 2FA submission: {exc}")
+            return False
+
+    def extract_session_cookies(self) -> dict[str, str]:
+        """Extract current mostaql session cookies from the httpx client."""
+        names = ["AWSALB", "AWSALBCORS", "mostaqlweb", "XSRF-TOKEN"]
+        result: dict[str, str] = {}
+        for name in names:
+            val = self._client.cookies.get(name)
+            if not val:
+                for cookie in self._client.cookies.jar:
+                    if cookie.name == name:
+                        val = cookie.value
+                        break
+            if val:
+                result[name] = val
+        return result
 
     # ── Listing Page ───────────────────────────────────────────────────────────
     async def fetch_jobs_list(self) -> list[Job]:
