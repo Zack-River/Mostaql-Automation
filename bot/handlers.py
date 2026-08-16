@@ -233,8 +233,7 @@ async def cb_gen_proposal(
     try:
         url = await db.get_job_url(job_id)
         if not url:
-            await msg.edit_text("⚠️ لم يتم العثور على رابط المشروع.")
-            return
+            url = f"https://mostaql.com/project/{job_id}"
         prev_state = await state.get_data()
         rated_job_id = prev_state.get("rated_job_id")
         rating_text = prev_state.get("rating_text", "") if rated_job_id == job_id else ""
@@ -277,8 +276,7 @@ async def cb_rate_project(
     try:
         url = await db.get_job_url(job_id)
         if not url:
-            await msg.edit_text("⚠️ لم يتم العثور على رابط المشروع.")
-            return
+            url = f"https://mostaql.com/project/{job_id}"
         from scraper.models import Job
         job = Job(id=job_id, url=url)
         await scraper.fetch_job_details(job)
@@ -339,8 +337,7 @@ async def process_rewrite_note(
     try:
         url = await db.get_job_url(job_id)
         if not url:
-            await msg.edit_text("⚠️ لم يتم العثور على رابط المشروع.")
-            return
+            url = f"https://mostaql.com/project/{job_id}"
         from scraper.models import Job
         job = Job(id=job_id, url=url, rating_text=rating_text)
         await scraper.fetch_job_details(job)
@@ -381,8 +378,7 @@ async def cb_quick_apply(
 
     url = await db.get_job_url(job_id) if db else None
     if not url:
-        await callback.message.reply("⚠️ لم يتم العثور على رابط المشروع.")
-        return
+        url = f"https://mostaql.com/project/{job_id}"
 
     msg = await callback.message.reply(
         "⚡ <b>جاري تحليل المشروع والحصول على الاقتراحات...</b>",
@@ -468,8 +464,7 @@ async def cb_custom_apply(
 
     url = await db.get_job_url(job_id) if db else None
     if not url:
-        await callback.message.reply("⚠️ لم يتم العثور على رابط المشروع.")
-        return
+        url = f"https://mostaql.com/project/{job_id}"
 
     msg = await callback.message.reply(
         "🛠 <b>جاري تهيئة التقديم المخصص...</b>",
