@@ -93,6 +93,24 @@ def _build_confirm_summary(data: dict) -> str:
     )
 
 
+import re
+
+def _clamp_price_to_budget(price_str: str, budget_str: str) -> str:
+    if not price_str or not budget_str:
+        return price_str
+    try:
+        price_val = float(price_str)
+        bounds = [float(x) for x in re.findall(r"\d+\.\d+|\d+", budget_str.replace(",", ""))]
+        if len(bounds) >= 2:
+            min_b, max_b = min(bounds), max(bounds)
+            if price_val < min_b:
+                return str(int(min_b)) if min_b.is_integer() else str(min_b)
+            if price_val > max_b:
+                return str(int(max_b)) if max_b.is_integer() else str(max_b)
+        return price_str
+    except Exception:
+        return price_str
+
 async def _fetch_form_and_suggestions(
     job_id: str,
     url: str,
@@ -119,6 +137,10 @@ async def _fetch_form_and_suggestions(
 
     form_questions = form_data.get("questions", [])
     suggestions = await generator.suggest_apply_params(job, form_questions)
+    
+    if "price" in suggestions and job.budget:
+        suggestions["price"] = _clamp_price_to_budget(str(suggestions["price"]), job.budget)
+        
     return form_data, suggestions
 
 

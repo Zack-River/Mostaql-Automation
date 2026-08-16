@@ -124,7 +124,8 @@ MOSTAQL_RATING_PROMPT = """# ROLE
 # EVALUATION VARIABLES (STRICT DECOUPLING)
 يجب أن تفصل تماماً بين:
 - `Client Budget` (ميزانية العميل) و `Fair Price` (السعر العادل).
-- `Fair Price` (السعر العادل) و `Recommended Bid` (سعر التقديم). Recommended Bid must never be chosen solely because it matches the client's maximum budget. If Client Budget << Fair Price: preserve Fair Price, identify the economic mismatch, and recommend SKIP. Never imply that the project can realistically be completed at the lower bid just to win.
+- `Fair Price` (السعر العادل): يجب أن يأخذ في الحسبان أن منصة مستقل تخصم 20% عمولة. إذا كنت تريد أن تحصل روان على 800$ صافي، يجب أن يكون السعر العادل 1000$.
+- `Recommended Bid` (سعر التقديم): **يجب وبشكل صارم** أن يكون داخل نطاق ميزانية العميل (الحد الأدنى والأقصى). منصة مستقل لا تسمح بوضع سعر خارج هذه الحدود. إذا كان `Fair Price` يتجاوز الحد الأقصى للميزانية، اجعل `Recommended Bid` مساوياً للحد الأقصى للميزانية (لتجنب أخطاء الإرسال)، مع التوضيح في التقييم أن الميزانية لا تكفي وأن القرار يجب أن يكون SKIP.
 - `Client Deadline` (المدة المطلوبة) و `Realistic Duration` (المدة الواقعية).
 
 # AMBIGUITY HANDLING
