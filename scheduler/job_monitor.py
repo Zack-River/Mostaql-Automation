@@ -204,6 +204,24 @@ class JobMonitor:
         # a. Fetch full details
         await self._scraper.fetch_job_details(job)
 
+        # b. Filter by client hiring rate
+        hiring_rate_str = job.client.hiring_rate
+        if not hiring_rate_str:
+            logger.info(f"⏭️ Skipping job {job.id}: Client has no hiring history.")
+            await self._db.mark_job_seen(job.id, title=job.title, url=job.url)
+            return
+
+        try:
+            rate = float(hiring_rate_str.replace('%', '').strip())
+            if rate < self._settings.min_hiring_rate:
+                logger.info(f"⏭️ Skipping job {job.id}: Hiring rate ({rate}%) is below minimum ({self._settings.min_hiring_rate}%).")
+                await self._db.mark_job_seen(job.id, title=job.title, url=job.url)
+                return
+        except ValueError:
+            logger.warning(f"⚠️ Could not parse hiring rate '{hiring_rate_str}' for job {job.id}. Skipping.")
+            await self._db.mark_job_seen(job.id, title=job.title, url=job.url)
+            return
+
         # c. Send Telegram notification
         message_text = format_notification(job)
         keyboard = job_keyboard(job_url=job.url, job_id=job.id)

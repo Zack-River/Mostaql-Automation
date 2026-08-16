@@ -55,6 +55,7 @@ class Settings:
     # ── Bot Behaviour ─────────────────────────────────────────────────
     poll_interval_seconds: int
     base_proposal_prompt: str
+    min_hiring_rate: float
 
     # ── Derived ───────────────────────────────────────────────────────
     mostaql_jobs_url: str = field(init=False)
@@ -106,4 +107,5 @@ def load_settings() -> Settings:
             "BASE_PROPOSAL_PROMPT",
             "أنا مطور محترف ذو خبرة واسعة."
         ),
+        min_hiring_rate=float(_optional("MIN_HIRING_RATE", "20.0")),
     )
