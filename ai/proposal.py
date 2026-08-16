@@ -178,3 +178,96 @@ class GeminiProposalGenerator:
             fmt_kwargs["user_notes"] = user_notes or "لا توجد ملاحظات إضافية."
 
         return template.format(**fmt_kwargs)
+
+    async def suggest_apply_params(
+        self,
+        job: Job,
+        form_questions: list[dict],
+    ) -> dict:
+        """
+        Returns AI-suggested bid parameters as a dict:
+          {
+            "price": "150",
+            "duration": "10",
+            "question_answers": [
+              {"index": 0, "id": "<q_id>", "answer": "..."},
+              ...
+            ]
+          }
+        Returns {} on failure.
+        """
+        if not self._enabled:
+            return {}
+
+        q_lines = ""
+        for i, q in enumerate(form_questions):
+            q_lines += f"{i + 1}. {q.get('text', '')}\n"
+
+        prompt = f"""أنت خبير في تقديم العروض على منصة مستقل.
+
+بناءً على تفاصيل المشروع أدناه، أعطني:
+1. السعر المناسب للعرض (رقم واحد محدد بالدولار، ليس نطاق).
+2. مدة التسليم المناسبة بالأيام (رقم واحد).
+3. إجابات مهنية ومقنعة على أسئلة المشروع إن وجدت.
+
+تفاصيل المشروع:
+العنوان: {job.title}
+الوصف: {(job.full_description or job.description_snippet or "")[:1500]}
+الميزانية المعلنة: {job.budget or "غير محدد"}
+المدة المطلوبة: {job.duration or "غير محدد"}
+
+الأسئلة الإضافية ({len(form_questions)}):
+{q_lines or "لا توجد أسئلة"}
+
+اقترح سعراً تنافسياً يكون عادلاً للطرفين، ليس أغلى من السقف ولا أرخص بشكل مبالغ فيه.
+للمدة، اقترح مدة واقعية تعكس خبرة احترافية بدون مبالغة في السرعة.
+
+أجب بـJSON فقط بدون أي نص قبله أو بعده:
+{{
+  "price": <number>,
+  "duration": <number>,
+  "question_answers": [
+    {{"index": 0, "answer": "<إجابة السؤال الأول>"}},
+    {{"index": 1, "answer": "<إجابة السؤال الثاني>"}}
+  ]
+}}
+إذا لم توجد أسئلة، اترك question_answers قائمة فارغة [].
+"""
+
+        for i, client in enumerate(self._clients):
+            try:
+                import json, re as _re
+                loop = asyncio.get_event_loop()
+                response = await loop.run_in_executor(
+                    None,
+                    lambda c=client: c.models.generate_content(
+                        model=self._model_name,
+                        contents=prompt,
+                        config=types.GenerateContentConfig(
+                            temperature=0.3,
+                            max_output_tokens=2000,
+                        ),
+                    ),
+                )
+                text = response.text.strip() if response.text else ""
+                # Extract JSON block
+                match = _re.search(r'\{.*\}', text, _re.DOTALL)
+                if match:
+                    data = json.loads(match.group())
+                    # Attach q_id to each answer using index
+                    for ans in data.get("question_answers", []):
+                        idx = ans.get("index", -1)
+                        if 0 <= idx < len(form_questions):
+                            ans["id"] = form_questions[idx].get("id", "")
+                    logger.info(f"suggest_apply_params OK for job {job.id}: {data}")
+                    return data
+            except Exception as exc:
+                is_429 = "429" in str(exc) or "RESOURCE_EXHAUSTED" in str(exc)
+                if is_429 and i < len(self._clients) - 1:
+                    logger.warning(f"Rate limit on key {i}, falling back...")
+                    continue
+                logger.error(f"suggest_apply_params error: {exc}")
+                return {}
+
+        return {}
+
