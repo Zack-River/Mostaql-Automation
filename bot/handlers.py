@@ -99,14 +99,19 @@ async def _fetch_form_and_suggestions(
     scraper,
     generator,
     applicator,
+    rating_text: str = "",
 ) -> tuple[dict | None, dict]:
     """
     Fetches form data from mostaql and gets AI suggestions.
     Returns (form_data, suggestions). Either can be {} on failure.
     """
     from scraper.models import Job
-    job = Job(id=job_id, url=url)
+    job = Job(id=job_id, url=url, rating_text=rating_text)
     await scraper.fetch_job_details(job)
+
+    # Ensure rating is present to provide a consistent mental model for params & proposal
+    if not job.rating_text and generator:
+        await generator.rate_job(job)
 
     form_data = await applicator.get_form_data(url) if applicator else None
     if not form_data:
@@ -230,9 +235,18 @@ async def cb_gen_proposal(
         if not url:
             await msg.edit_text("⚠️ لم يتم العثور على رابط المشروع.")
             return
+        prev_state = await state.get_data()
+        rated_job_id = prev_state.get("rated_job_id")
+        rating_text = prev_state.get("rating_text", "") if rated_job_id == job_id else ""
+        
         from scraper.models import Job
-        job = Job(id=job_id, url=url)
+        job = Job(id=job_id, url=url, rating_text=rating_text)
         await scraper.fetch_job_details(job)
+        
+        # Ensure rating is present to provide consistent mental model for proposal
+        if not job.rating_text and generator:
+            await generator.rate_job(job)
+            
         proposal = await generator.generate(job)
         if not proposal:
             await msg.edit_text("⚠️ تعذر توليد العرض. تحقق من مفاتيح Gemini API.")
@@ -251,6 +265,7 @@ async def cb_gen_proposal(
 @router.callback_query(F.data.startswith("rate_project:"))
 async def cb_rate_project(
     callback: CallbackQuery,
+    state: FSMContext,
     db=None, scraper=None, generator=None
 ) -> None:
     job_id = callback.data.split(":", 1)[1]
@@ -271,6 +286,9 @@ async def cb_rate_project(
         if not rating:
             await msg.edit_text("⚠️ تعذر تقييم المشروع. تحقق من مفاتيح Gemini API.")
             return
+            
+        await state.update_data(rating_text=rating, rated_job_id=job_id)
+
         await msg.edit_text(
             f"📊 <b>تقييم المشروع:</b>\n\n{markdown_to_telegram_html(rating)}",
             parse_mode="HTML",
@@ -302,8 +320,18 @@ async def process_rewrite_note(
 ) -> None:
     data = await state.get_data()
     job_id = data.get("job_id")
+    rated_job_id = data.get("rated_job_id")
+    rating_text = data.get("rating_text", "") if rated_job_id == job_id else ""
+    
     note   = message.text.strip() if message.text else ""
     await state.clear()
+    
+    # Preserve the rating state in case they want to rewrite again later,
+    # but since state is cleared, maybe they have to rate again? 
+    # Let's restore the rating in state just in case
+    if rating_text:
+        await state.update_data(rating_text=rating_text, rated_job_id=job_id)
+        
     if not (db and scraper and generator and job_id):
         await message.answer("⚠️ حدث خطأ.")
         return
@@ -314,8 +342,12 @@ async def process_rewrite_note(
             await msg.edit_text("⚠️ لم يتم العثور على رابط المشروع.")
             return
         from scraper.models import Job
-        job = Job(id=job_id, url=url)
+        job = Job(id=job_id, url=url, rating_text=rating_text)
         await scraper.fetch_job_details(job)
+        
+        if not job.rating_text and generator:
+            await generator.rate_job(job)
+            
         proposal = await generator.generate(job, user_notes=note)
         if not proposal:
             await msg.edit_text("⚠️ تعذر توليد العرض.")
@@ -358,8 +390,12 @@ async def cb_quick_apply(
     )
 
     try:
+        prev_state = await state.get_data()
+        rated_job_id = prev_state.get("rated_job_id")
+        rating_text = prev_state.get("rating_text", "") if rated_job_id == job_id else ""
+        
         form_data, suggestions = await _fetch_form_and_suggestions(
-            job_id, url, scraper, generator, applicator
+            job_id, url, scraper, generator, applicator, rating_text=rating_text
         )
         if not form_data:
             await msg.edit_text("⚠️ تعذر جلب بيانات فورم التقديم. تأكد أن الجلسة لا تزال صالحة.")

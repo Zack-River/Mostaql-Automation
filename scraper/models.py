@@ -56,6 +56,7 @@ class Job:
 
     # ── AI-generated content ──────────────────────────────────────────
     proposal: str = ""
+    rating_text: str = ""
 
     @property
     def has_questions(self) -> bool:

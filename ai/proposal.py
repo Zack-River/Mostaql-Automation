@@ -128,6 +128,7 @@ class GeminiProposalGenerator:
                     ),
                 )
                 text = response.text.strip() if response.text else ""
+                job.rating_text = text
                 logger.info(f"Rating generated for job {job.id} using key index {i} ({len(text)} chars)")
                 return text
             except Exception as exc:
@@ -176,6 +177,8 @@ class GeminiProposalGenerator:
         # user_notes only exists in MOSTAQL_SYSTEM_PROMPT template
         if not is_rating:
             fmt_kwargs["user_notes"] = user_notes or "لا توجد ملاحظات إضافية."
+            if hasattr(job, 'rating_text') and job.rating_text:
+                fmt_kwargs["user_notes"] += f"\n\nالتقييم الداخلي (Internal Rating):\n{job.rating_text}"
 
         return template.format(**fmt_kwargs)
 
@@ -219,14 +222,18 @@ class GeminiProposalGenerator:
 الأسئلة الإضافية ({len(form_questions)}):
 {q_lines or "لا توجد أسئلة"}
 
+التقييم الداخلي السابق (استخدم هذا التقييم لتحديد السعر والمدة المقترحة):
+{job.rating_text or "لا يوجد تقييم مسبق"}
+
 # PRICING & DURATION MENTAL MODEL (STRICT RULES)
 استخدم نفس معايير التقييم لحساب السعر والمدة:
 1. **Realistic Effort (الجهد الواقعي)** = حجم العمل الفعلي + التعقيد + العمل المخفي (Hidden Work) + أوقات الاختبار (QA) + المخاطر.
 2. احسب داخلياً (Fair Price) و (Realistic Duration) بناءً على الجهد الواقعي.
 3. افصل تماماً بين "مدة العميل" و"المدة الواقعية المقترحة". إذا كانت مدة العميل (مثلاً 7 أيام) مستحيلة لتنفيذ تطبيق كامل، يجب أن تقترح المدة الواقعية (مثلاً 30 يوماً).
-4. افصل تماماً بين "ميزانية العميل" و"السعر العادل". لا ترفع السعر لمجرد أن الميزانية عالية، ولا تخفضه لدرجة تجعلك تعمل بلا أجر إذا كانت الميزانية منخفضة وحجم العمل كبير.
-5. لا تفترض وجود تقنيات (Dashboards, APIs, Payment, Backend) إذا لم تذكر، ولكن قدّر المخاطر المرتبطة بالغموض (Ambiguity Risk) عند التسعير.
-6. إذا كانت الأسئلة تطلب إجابات عن خبرة غير موجودة، لا تخترعها. قدم إجابات تعكس فهمك الفعلي كـ Software Engineer & QA.
+4. افصل تماماً بين "ميزانية العميل" و"السعر العادل". لا ترفع السعر لمجرد أن الميزانية عالية.
+5. **SKIP CONSISTENCY**: إذا كان السعر العادل (Fair Price) أعلى بكثير من ميزانية العميل (مثلاً 6000$ والميزانية 2500$)، لا تخفض سعر التقديم إلى 2500$ لتفوز بالمشروع. يجب أن تقترح السعر الواقعي (6000$) وتتجاهل ميزانية العميل، لأن هذا المشروع يُفترض أن يكون (SKIP). لا تعطِ سعراً يجعلك تعمل بخسارة أبداً.
+6. لا تفترض وجود تقنيات (Dashboards, APIs, Payment, Backend) إذا لم تذكر، ولكن قدّر المخاطر المرتبطة بالغموض عند التسعير.
+7. إذا كانت الأسئلة تطلب إجابات عن خبرة غير موجودة، لا تخترعها. قدم إجابات تعكس فهمك الفعلي كـ Software Engineer & QA.
 
 أجب بـ JSON صالح (Valid JSON) فقط، بدون أي نص قبله أو بعده، وبدون أي علامات Markdown:
 {{

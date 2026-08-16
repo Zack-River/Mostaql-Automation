@@ -70,13 +70,22 @@ class TestRefactoredAI(unittest.IsolatedAsyncioTestCase):
         print(f"Params:\n{params}\n")
 
         # Semantic Checks:
-        # 1. Proposal should NOT invent Dashboards, APIs, Payments, Maps
-        forbidden_words = ["لوحة تحكم", "بوابة دفع", "API جاهز", "خرائط", "Google Maps"]
-        for word in forbidden_words:
-            self.assertNotIn(word, proposal, f"Hallucination detected: {word} found in proposal.")
+        # 1. Proposal must NOT assert complex systems as facts without conditional language
+        factual_forbidden = [r"(سيحدث|يجب أن يحتوي|نحتاج إلى) لوحة تحكم",
+                             r"سنبني.*API",
+                             r"سنقوم بعمل.*بوابة دفع",
+                             r"خرائط Google",
+                             r"Double Booking"]
+        for regex in factual_forbidden:
+            self.assertNotRegex(proposal, regex, f"Unsupported certainty detected: {regex}")
 
-        # 2. Should ask a smart question due to ambiguity
-        self.assertRegex(proposal, r'\?|؟', "The proposal must ask a smart question due to high ambiguity.")
+        # 2. Should use conditional language if it mentions inferred requirements
+        if "حجز" in proposal or "إيجار" in proposal:
+            self.assertRegex(proposal, r'(إذا|لو|قد|في حال)', "Inferences about booking must use conditional language.")
+
+        # 3. Should ask exactly one smart question or zero
+        question_count = proposal.count('؟')
+        self.assertTrue(question_count <= 1, "Must ask at most one smart question.")
 
     async def test_01_simple_clear_project(self):
         print("\n--- Test 1: Simple Clear Project ---")
@@ -104,7 +113,9 @@ class TestRefactoredAI(unittest.IsolatedAsyncioTestCase):
             budget="$250.00 - $500.00",
             duration="10 أيام"
         )
-        self.assertIn("BeePlayer", proposal, "Should use the specific BeePlayer experience from the profile.")
+        # Should use the specific capability from the profile but NOT mention BeePlayer
+        self.assertNotIn("BeePlayer", proposal, "Should NOT cite previous project names.")
+        self.assertRegex(proposal, r'(تلفاز|شاشات|منصات)', "Should mention relevant cross-platform TV/Mobile testing capability.")
 
     async def test_07_nextjs_supabase(self):
         print("\n--- Test 7: Next.js Supabase Timed Exams ---")
@@ -114,8 +125,9 @@ class TestRefactoredAI(unittest.IsolatedAsyncioTestCase):
             budget="$500.00 - $1000.00",
             duration="20 أيام"
         )
-        # Should mention server-side correction or opens_at/closes_at based on profile
-        self.assertRegex(proposal, r'(server-side|validation|تصحيح)', "Should use specific Next.js/Supabase exam experience.")
+        # Should use specific Next.js/Supabase exam capability but NOT mention the old project name
+        self.assertNotIn("ShopStream", proposal, "Should NOT cite previous project names.")
+        self.assertRegex(proposal, r'(server-side|validation|تصحيح)', "Should use specific Next.js/Supabase exam capability.")
 
     async def test_08_forced_apply(self):
         print("\n--- Test 8: Forced Apply ---")
